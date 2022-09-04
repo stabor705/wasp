@@ -1,2 +1,3 @@
+pub mod peerid;
 mod torrent;
-mod tracker;
+pub mod tracker;
