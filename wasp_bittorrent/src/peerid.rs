@@ -1,7 +1,7 @@
 use semver::Version;
 
-use std::default::Default;
 use std::clone::Clone;
+use std::default::Default;
 
 #[derive(Clone)]
 pub struct PeerID {

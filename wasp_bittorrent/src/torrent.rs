@@ -1,9 +1,16 @@
-use anyhow::Error;
+use crate::peer::Peer;
+use crate::peerid::PeerID;
+use crate::tracker::{self, Query};
+
+use anyhow::Result;
 use hyper::Uri;
 use serde::{Deserialize, Serialize};
-use sha1::Sha1;
+use serde_bencode::value::Value;
+use sha1::{Digest, Sha1};
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Deserialize, Serialize)]
 struct MetainfoFile {
@@ -20,7 +27,7 @@ struct Info {
     name: String,
     length: i64,
     files: Option<Vec<MetainfoFile>>,
-    private: Option<bool>,
+    //private: Option<bool>,
     #[serde(rename = "meta version")]
     meta_version: Option<u32>,
 }
@@ -38,12 +45,12 @@ struct File {
 }
 
 pub struct Torrent {
-    links: Vec<Uri>,
+    uris: Vec<Uri>,
     piece_length: i64,
     pieces: Vec<[u8; 20]>,
     files: Vec<File>,
     info_hash: [u8; 20],
-    peer_id: [u8; 20],
+    peer_id: PeerID,
 }
 
 impl Torrent {
@@ -55,31 +62,35 @@ impl Torrent {
             piece.copy_from_slice(chunk);
             pieces.push(piece);
         }
-        //TODO: It's not very correct
-        let info_bencoded = serde_bencode::to_bytes(&metainfo.info)?;
+
+        let dict = serde_bencode::from_bytes::<HashMap<String, Value>>(bencode)?;
+        let info = serde_bencode::to_bytes(&dict["info"])?;
         let mut hasher = Sha1::new();
-        hasher.update(&info_bencoded);
+        hasher.update(info);
         let info_hash: [u8; 20] = hasher.finalize().into();
 
         Ok(Torrent {
-            links: vec![Uri::from_str(metainfo.announce.as_str())?],
+            uris: vec![Uri::from_str(metainfo.announce.as_str())?],
             piece_length: metainfo.info.piece_length,
             pieces,
             files: Vec::new(),
             info_hash,
-            peer_id: Torrent::generate_peer_id(['W' as u8, 'A' as u8]),
+            peer_id: PeerID::default(),
         })
     }
 
-    fn generate_peer_id(client_id: [u8; 2]) -> [u8; 20] {
-        let mut peer_id = [0 as u8; 20];
-        peer_id[0] = '-' as u8;
-        peer_id[1..3].copy_from_slice(&client_id);
-        //TODO: version number
-        peer_id[3..7].fill(1);
-        peer_id[7..].fill_with(rand::random);
-        peer_id
+    pub async fn get_peers(&self) -> Result<Vec<Peer>> {
+        let client = tracker::Client::new(&self.peer_id);
+        let info_hash = [0 as u8; 20];
+        let query = Query {
+            uris: self.uris.clone(),
+            info_hash: self.info_hash,
+            port: 6881,
+            uploaded: 0,
+            downloaded: 0,
+            left: 0,
+        };
+        let results = client.query_peers(query).await?;
+        Ok(results.peers)
     }
-
-    pub async fn get_peers(&self) -> Result<()> {}
 }

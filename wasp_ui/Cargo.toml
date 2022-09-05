@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 bittorrent = { path = "../wasp_bittorrent", package = "wasp_bittorrent"}
 tokio = {version = "1.21.0", features = [ "full" ] }
+serde_bencode = "0.2.3"
+simplelog = "0.12.0"
