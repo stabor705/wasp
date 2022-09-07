@@ -1,11 +1,10 @@
-use crate::peer::Peer;
+use crate::peer::PeerData;
 use crate::peerid::PeerID;
 
 use anyhow::{Error, Result};
 use hyper::{body, client::HttpConnector, Body, Uri};
 use serde::{Deserialize, Serialize};
 
-use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 #[derive(thiserror::Error, Debug)]
@@ -29,7 +28,7 @@ pub struct Query {
 }
 
 pub struct QueryResult {
-    pub peers: Vec<Peer>,
+    pub peers: Vec<PeerData>,
     pub seeders: i64,
     pub leechers: i64,
 }
@@ -71,6 +70,10 @@ impl Client {
             Some(scheme) => scheme,
             None => return None,
         };
+        //TODO: implement other protocols
+        if scheme.as_str() != "http" {
+            return None;
+        }
         let authority = match uri.authority() {
             Some(authority) => authority,
             None => return None,
@@ -127,7 +130,7 @@ impl Client {
         }
     }
 
-    fn process_peers(tracker_peers: TrackerPeers) -> Result<Vec<Peer>> {
+    fn process_peers(tracker_peers: TrackerPeers) -> Result<Vec<PeerData>> {
         let mut peers = Vec::new();
         match tracker_peers {
             TrackerPeers::DictModel(dict_peers) => {
@@ -144,7 +147,7 @@ impl Client {
                     let mut port = chunk[4] as u16;
                     port = port << 8;
                     port = port + chunk[5] as u16;
-                    peers.push(Peer {
+                    peers.push(PeerData {
                         addr: SocketAddr::new(IpAddr::V4(ip), port),
                     });
                 }

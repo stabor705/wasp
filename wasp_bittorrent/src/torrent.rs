@@ -1,4 +1,4 @@
-use crate::peer::Peer;
+use crate::peer::PeerData;
 use crate::peerid::PeerID;
 use crate::tracker::{self, Query};
 
@@ -35,6 +35,8 @@ struct Info {
 #[derive(Deserialize, Serialize)]
 struct Metainfo {
     announce: String,
+    #[serde(rename = "announce-list")]
+    announce_list: Option<Vec<String>>,
     info: Info,
     //TODO: Optional fields
 }
@@ -55,7 +57,17 @@ pub struct Torrent {
 
 impl Torrent {
     pub fn from_bencode(bencode: &[u8]) -> Result<Torrent> {
-        let metainfo = serde_bencode::from_bytes::<Metainfo>(bencode)?;
+        let mut metainfo = serde_bencode::from_bytes::<Metainfo>(bencode)?;
+
+        let mut uris = Vec::new();
+        if let Some(announce_list) = &metainfo.announce_list {
+            for uri in announce_list {
+                uris.push(Uri::from_str(uri)?);
+            }
+        } else {
+            uris.push(Uri::from_str(&metainfo.announce)?);
+        }
+
         let mut pieces = Vec::new();
         for chunk in metainfo.info.pieces.chunks_exact(20) {
             let mut piece = [0 as u8; 20];
@@ -70,16 +82,16 @@ impl Torrent {
         let info_hash: [u8; 20] = hasher.finalize().into();
 
         Ok(Torrent {
-            uris: vec![Uri::from_str(metainfo.announce.as_str())?],
+            uris,
             piece_length: metainfo.info.piece_length,
             pieces,
             files: Vec::new(),
             info_hash,
-            peer_id: PeerID::default(),
+            peer_id: PeerID::new(),
         })
     }
 
-    pub async fn get_peers(&self) -> Result<Vec<Peer>> {
+    pub async fn get_peers(&self) -> Result<Vec<PeerData>> {
         let client = tracker::Client::new(&self.peer_id);
         let info_hash = [0 as u8; 20];
         let query = Query {
