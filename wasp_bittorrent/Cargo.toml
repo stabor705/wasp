@@ -14,6 +14,8 @@ anyhow = "1.0.63"
 thiserror = "1.0.33"
 hyper = { version = "0.14.20", features = [ "client", "http1", "tcp" ]}
 tokio = { version = "1.21.0", feature = "full" } #TODO: probably less features are needed
+tokio-util = { version = "0.7.4", features = [  "codec" ] }
+futures = "0.3.24"
 urlencoding = "2.1.2"
 sha-1 = "0.10.0"
 sha2 = "0.10.5"
