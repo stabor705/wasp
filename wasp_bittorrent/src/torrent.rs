@@ -1,16 +1,12 @@
-use crate::peer::PeerData;
 use crate::peerid::PeerID;
-use crate::tracker::{self, Query};
 
-use anyhow::Result;
-use hyper::Uri;
 use serde::{Deserialize, Serialize};
 use serde_bencode::value::Value;
 use sha1::{Digest, Sha1};
+use url::Url;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 #[derive(Deserialize, Serialize)]
 struct MetainfoFile {
@@ -34,9 +30,9 @@ struct Info {
 
 #[derive(Deserialize, Serialize)]
 struct Metainfo {
-    announce: String,
+    announce: Url,
     #[serde(rename = "announce-list")]
-    announce_list: Option<Vec<String>>,
+    announce_list: Option<Vec<Url>>,
     info: Info,
     //TODO: Optional fields
 }
@@ -47,7 +43,7 @@ struct File {
 }
 
 pub struct Torrent {
-    uris: Vec<Uri>,
+    urls: Vec<Url>,
     piece_length: i64,
     pieces: Vec<[u8; 20]>,
     files: Vec<File>,
@@ -55,25 +51,35 @@ pub struct Torrent {
     peer_id: PeerID,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum TorrentFileCodingError {
+    #[error("pieces value not multiple of 20")]
+    InvalidPiecesLength,
+    #[error("provided bencode encoding was incorrect")]
+    IncorrectEncoding {
+        #[from]
+        source: serde_bencode::Error,
+    },
+}
+
 impl Torrent {
-    pub fn from_bencode(bencode: &[u8]) -> Result<Torrent> {
-        let mut metainfo = serde_bencode::from_bytes::<Metainfo>(bencode)?;
+    pub fn from_bencode(bencode: &[u8]) -> Result<Torrent, TorrentFileCodingError> {
+        let metainfo = serde_bencode::from_bytes::<Metainfo>(bencode)?;
 
-        let mut uris = Vec::new();
-        if let Some(announce_list) = &metainfo.announce_list {
-            for uri in announce_list {
-                uris.push(Uri::from_str(uri)?);
-            }
+        let urls = if let Some(announce_list) = metainfo.announce_list {
+            announce_list
         } else {
-            uris.push(Uri::from_str(&metainfo.announce)?);
+            vec![metainfo.announce]
+        };
+        if metainfo.info.pieces.len() % 20 != 0 {
+            return Err(TorrentFileCodingError::InvalidPiecesLength);
         }
-
-        let mut pieces = Vec::new();
-        for chunk in metainfo.info.pieces.chunks_exact(20) {
-            let mut piece = [0 as u8; 20];
-            piece.copy_from_slice(chunk);
-            pieces.push(piece);
-        }
+        let pieces: Vec<[u8; 20]> = metainfo
+            .info
+            .pieces
+            .chunks_exact(20)
+            .map(|chunk| <[u8; 20]>::try_from(chunk).unwrap())
+            .collect();
 
         let dict = serde_bencode::from_bytes::<HashMap<String, Value>>(bencode)?;
         let info = serde_bencode::to_bytes(&dict["info"])?;
@@ -82,27 +88,12 @@ impl Torrent {
         let info_hash: [u8; 20] = hasher.finalize().into();
 
         Ok(Torrent {
-            uris,
+            urls,
             piece_length: metainfo.info.piece_length,
             pieces,
             files: Vec::new(),
             info_hash,
             peer_id: PeerID::new(),
         })
-    }
-
-    pub async fn get_peers(&self) -> Result<Vec<PeerData>> {
-        let client = tracker::Client::new(&self.peer_id);
-        let info_hash = [0 as u8; 20];
-        let query = Query {
-            uris: self.uris.clone(),
-            info_hash: self.info_hash,
-            port: 6881,
-            uploaded: 0,
-            downloaded: 0,
-            left: 0,
-        };
-        let results = client.query_peers(query).await?;
-        Ok(results.peers)
     }
 }

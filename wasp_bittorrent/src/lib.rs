@@ -1,4 +1,4 @@
 mod peer;
 mod peerid;
 pub mod torrent;
-mod tracker;
+mod tracker_client;
